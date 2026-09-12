@@ -61,8 +61,6 @@ jobs:
           test -f "$R/lib/librt-2.13.so"
           test -f "$R/lib/libm-2.13.so"
 
-          # p7zip intentionally skips several relative/absolute symlinks.
-          # Recreate only link names needed by the linker/runtime checks.
           ln -sfn ld-2.13.so "$R/lib/ld-linux.so.3"
           ln -sfn libc-2.13.so "$R/lib/libc.so.6"
           ln -sfn libpthread-2.13.so "$R/lib/libpthread.so.0"
@@ -84,6 +82,10 @@ jobs:
         run: |
           set -euo pipefail
           R="$PWD/extracted/XDJRX3-rootfs"
+          # Newer glibc headers may macro-redirect open() to open64(), while
+          # fbshim intentionally exports both symbols. Patch only the temporary
+          # CI checkout so upstream source behaviour remains otherwise unchanged.
+          sed -i '/#include <poll.h>/a \\n#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif' scripts/shims/fbshim-tsc.c
           make -C scripts/shims RX3="$R" knobshim2.so fbshim-tsc.so seqinject2
           for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so; do
             file "$f"
@@ -98,7 +100,6 @@ jobs:
         run: |
           set -euo pipefail
           R="$PWD/extracted/XDJRX3-rootfs"
-          # Supply cross libc headers while retaining RX3 2.13 runtime libraries.
           mkdir -p "$R/usr/include"
           cp -a /usr/arm-linux-gnueabi/include/. "$R/usr/include/"
 
