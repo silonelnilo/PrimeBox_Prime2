@@ -82,8 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           R="$PWD/extracted/XDJRX3-rootfs"
-          sed -i '/#include <poll.h>/a \
-#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif' scripts/shims/fbshim-tsc.c
+          sed -i '/#include <poll.h>/a \\n#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif' scripts/shims/fbshim-tsc.c
           make -C scripts/shims RX3="$R" knobshim2.so fbshim-tsc.so seqinject2
           for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so; do
             file "$f"
