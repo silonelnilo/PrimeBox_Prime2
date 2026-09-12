@@ -4,6 +4,8 @@ import os
 import re
 import subprocess
 import sys
+import struct
+from pathlib import Path
 
 
 def validate(header, attributes, symbols, dynamic):
@@ -37,6 +39,29 @@ def validate(header, attributes, symbols, dynamic):
     return errors
 
 
+def uint_symbol(path, symbol, extra=0):
+    """Read a uint32 exported by an ELF32 little-endian object."""
+    readelf = os.environ.get('CROSS', 'arm-linux-gnueabi-') + 'readelf'
+    table = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True)
+    for line in table.splitlines():
+        row = line.split()
+        if len(row) >= 8 and row[7] == symbol and row[6] != 'UND':
+            address = int(row[1], 16) + extra
+            break
+    else:
+        raise ValueError(f'missing ABI metadata symbol: {symbol}')
+    data = Path(path).read_bytes()
+    if data[:6] != b'\x7fELF\x01\x01':
+        raise ValueError('expected ELF32 little endian')
+    phoff, = struct.unpack_from('<I', data, 28)
+    entsize, count = struct.unpack_from('<HH', data, 42)
+    for n in range(count):
+        kind, offset, vaddr, _, filesz = struct.unpack_from('<IIIII', data, phoff + n * entsize)
+        if kind == 1 and vaddr <= address and address + 4 <= vaddr + filesz:
+            return struct.unpack_from('<I', data, offset + address - vaddr)[0]
+    raise ValueError('ABI metadata outside file-backed segments')
+
+
 def main():
     module = sys.argv[1]
     cross = os.environ.get('CROSS', 'arm-linux-gnueabi-')
@@ -45,6 +70,13 @@ def main():
     header, attributes = run('readelf', '-h'), run('readelf', '-A')
     symbols, dynamic = run('objdump', '-T'), run('readelf', '-d')
     errors = validate(header, attributes, symbols, dynamic)
+    if len(sys.argv) > 2:
+        root = Path(sys.argv[2])
+        expected = uint_symbol(root / 'usr/lib/libdirectfb-1.4.so.0', 'dfb_core_systems', 28)
+        actual = uint_symbol(module, 'primebox_dfb_system_abi')
+        if actual != expected:
+            errors.append(f'DirectFB private system ABI {actual} != RX3 {expected}')
+        print(f'DirectFB system ABI: plugin={actual}, RX3={expected}')
     if errors:
         print(symbols)
         print(dynamic)

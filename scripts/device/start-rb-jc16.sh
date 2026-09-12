@@ -53,7 +53,7 @@ for f in \
     "$CHROOT/usr/bin/edb_streamd"; do
     [ -e "$f" ] || fail "missing required file: $f"
 done
-mkdir -p "$CHROOT/root/pdj" "$CHROOT/usr/lib" "$CHROOT/usr/lib/directfb-1.4-6/systems"
+mkdir -p "$CHROOT/root/pdj" "$CHROOT/usr/lib" "$CHROOT/usr/lib/directfb-1.4-0/systems"
 
 . /data/jc16-runtime.sh
 
@@ -88,8 +88,8 @@ cp /data/fbshim-tsc.so "$CHROOT/root/pdj/fbshim.so"
 cp /data/fbshim-tsc.so "$CHROOT/usr/lib/fbshim.so"
 chmod 755 "$CHROOT/usr/lib/fbshim.so" "$CHROOT/root/pdj/fbshim.so"
 
-cp /data/libdirectfb_fbdev-rot16.so "$CHROOT/usr/lib/directfb-1.4-6/systems/libdirectfb_fbdev.so"
-chmod 755 "$CHROOT/usr/lib/directfb-1.4-6/systems/libdirectfb_fbdev.so"
+cp /data/libdirectfb_fbdev-rot16.so "$CHROOT/usr/lib/directfb-1.4-0/systems/libdirectfb_fbdev.so"
+chmod 755 "$CHROOT/usr/lib/directfb-1.4-0/systems/libdirectfb_fbdev.so"
 
 # 5. Clean stale IPC/logs.
 rm -f /tmp/guard_LocalDBServer /tmp/req_LocalDBServer \

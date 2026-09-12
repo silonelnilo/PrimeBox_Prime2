@@ -119,3 +119,29 @@ They exercise the symbol-column regression, incompatible/missing symbols,
 process selection, rollback service failures, rollback on unexpected startup
 failure, and aborting device setup after failed unmount. Hardware testing is
 still required; these tests do not connect to a Prime 2.
+
+### Runtime compatibility follow-up
+
+Build #15 completed, but comparison against the actual RX3 runtime revealed
+unversioned C23 parsing imports and a private DirectFB ABI mismatch. Therefore
+its artifact is **superseded; do not deploy build #15**.
+
+The JC16 module now targets the pinned DirectFB **1.4.0** source commit
+`243d71d1cfa67ab3963590fe39b25d93a53333dc`, matching RX3's private system ABI 9.
+`directfb-1.4.0-jc16.diff` adapts the existing rotation/framebuffer changes to
+that version's surface allocation API. The plugin links directly against the
+original RX3 libraries; no replacement core libraries are shipped. The launcher
+installs it under `usr/lib/directfb-1.4-0/systems`, the actual RX3 search path.
+The filename `libdirectfb_fbdev-rot16.so` is retained for deployment compatibility;
+it no longer denotes DirectFB version 1.4.16.
+
+The build checks the module ABI marker against `dfb_core_systems` in RX3,
+and rejects unresolved strong imports across the real dependency closure.
+The small `legacy-scan.c` compatibility functions preserve pre-C23 parsing for
+the existing decimal/hex and scanf call sites without requiring newer glibc.
+
+`tools/bundle/prepare-rx3.py` can prepare a local runtime staging tree from the
+three official ZIPs (firmware and both GPL source parts). It requires Python,
+`pycryptodome`, `pycdlib`, and an `unzip` supporting Deflate64. It only writes
+to a new output directory, preserves confined runtime symlinks, omits device
+nodes and removes the extracted key. It does not flash or contact the console.

@@ -110,3 +110,28 @@ systemctl() { echo "SERVICE $*"; ''' + ('return 1;' if fail else 'return 0;') + 
 
 if __name__ == '__main__':
     unittest.main()
+
+class LinkChecks(unittest.TestCase):
+    def test_unversioned_modern_import_is_rejected(self):
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('links', ROOT / 'tools/build-directfb/verify-rx3-links.py')
+        links = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(links)
+        with patch.object(links, 'inspect', return_value=([], set(), {'__isoc23_strtol'})), patch.object(links.sys, 'argv', ['verify', '/tmp', '/tmp/module.so']):
+            with self.assertRaisesRegex(SystemExit, '__isoc23_strtol'):
+                links.main()
+
+    def test_private_abi_is_read_from_elf_segment(self):
+        import struct
+        from unittest.mock import patch
+        data = bytearray(256)
+        data[:6] = b'\x7fELF\x01\x01'
+        struct.pack_into('<I', data, 28, 52)
+        struct.pack_into('<HH', data, 42, 32, 1)
+        struct.pack_into('<IIIII', data, 52, 1, 128, 0x1000, 0, 128)
+        struct.pack_into('<I', data, 156, 9)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'lib.so'
+            path.write_bytes(data)
+            with patch.object(verify.subprocess, 'check_output', return_value='1: 00001000 40 OBJECT GLOBAL DEFAULT 1 dfb_core_systems'):
+                self.assertEqual(verify.uint_symbol(path, 'dfb_core_systems', 28), 9)

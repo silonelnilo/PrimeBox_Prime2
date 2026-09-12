@@ -107,23 +107,17 @@ jobs:
           mkdir -p "$R/usr/include"
           cp -a /usr/arm-linux-gnueabi/include/. "$R/usr/include/"
 
-          git clone https://github.com/deniskropp/flux.git /tmp/flux
-          git -C /tmp/flux checkout 10ad2ebc78b396032714b839f200848ea0dd9503
-          cd /tmp/flux
-          ./autogen.sh
-          ./configure --prefix=/tmp/flux-install
-          make -j2
-          make install
-          export PATH="/tmp/flux-install/bin:$PATH"
-          test "$(fluxcomp -V)" -ge 1004002
-
-          git clone --depth 1 --branch directfb-1.4 https://github.com/deniskropp/DirectFB.git /tmp/directfb
-          grep -q 'DIRECTFB_MICRO_VERSION=16' /tmp/directfb/configure.in
+          # Build against the same private module ABI as the RX3 libraries.
+          git clone --no-checkout https://github.com/deniskropp/DirectFB.git /tmp/directfb
+          git -C /tmp/directfb checkout 243d71d1cfa67ab3963590fe39b25d93a53333dc
           cd /tmp/directfb
-          patch -p1 < "$GITHUB_WORKSPACE/tools/build-directfb/directfb-full.diff"
+          grep -Eq 'DFB_CORE_SYSTEM_ABI_VERSION +9$' src/core/system.h
+          patch -p1 < "$GITHUB_WORKSPACE/tools/build-directfb/directfb-1.4.0-jc16.diff"
 
           cat > systems/fbdev/compat_shim.c <<'EOF'
           #define _GNU_SOURCE
+          #include <core/system.h>
+          const unsigned int primebox_dfb_system_abi = DFB_CORE_SYSTEM_ABI_VERSION;
           #include <sys/types.h>
           #include <sys/stat.h>
           #include <sys/select.h>
@@ -141,6 +135,8 @@ jobs:
           }
           EOF
 
+          cat "$GITHUB_WORKSPACE/scripts/shims/legacy-scan.c" >> systems/fbdev/compat_shim.c
+
           export CC=arm-linux-gnueabi-gcc
           export CXX=arm-linux-gnueabi-g++
           export CFLAGS="-O2 -march=armv5t -mfloat-abi=soft -U_FILE_OFFSET_BITS -D_FILE_OFFSET_BITS=32 -U_TIME_BITS -D_TIME_BITS=32 --sysroot=$R"
@@ -153,17 +149,27 @@ jobs:
             --with-gfxdrivers=none --disable-osx --disable-devmem
 
           make -C include directfb_strings.h directfb_keynames.h
-          make -C lib -j2
-          make -C src -j2
-          make -C systems/fbdev -j2 libdirectfb_fbdev.la
-
+          # Link the plugin directly to the original RX3 libraries. Building
+          # new core libraries would silently change the private DirectFB ABI.
+          mkdir -p systems/fbdev/.libs
           MOD=systems/fbdev/.libs/libdirectfb_fbdev.so
-          test -f "$MOD"
-          for s in libdirect-1.4.so.6 libfusion-1.4.so.6 libdirectfb-1.4.so.6; do
-            patchelf --replace-needed "$s" "${s%.6}.0" "$MOD"
-          done
-          patchelf --remove-rpath "$MOD"
-          python3 "$GITHUB_WORKSPACE/tools/build-directfb/verify-module.py" "$MOD"
+          $CC $CFLAGS -fPIC -shared -DHAVE_CONFIG_H -D_GNU_SOURCE \
+            -I. -Iinclude -Ilib -Isrc -Isystems/fbdev \
+            systems/fbdev/compat_shim.c systems/fbdev/agp.c \
+            systems/fbdev/fbdev.c systems/fbdev/fbdev_surface_pool.c \
+            systems/fbdev/surfacemanager.c systems/fbdev/vt.c \
+            "$R/usr/lib/libdirect-1.4.so.0.0.0" \
+            "$R/usr/lib/libfusion-1.4.so.0.0.0" \
+            "$R/usr/lib/libdirectfb-1.4.so.0.0.0" \
+            "$R/lib/libdl-2.13.so" "$R/lib/libpthread-2.13.so" \
+            "$R/lib/libc-2.13.so" \
+            $LDFLAGS -Wl,-z,defs -Wl,-soname,libdirectfb_fbdev.so -o "$MOD"
+          python3 "$GITHUB_WORKSPACE/tools/build-directfb/verify-module.py" "$MOD" "$R"
+          python3 "$GITHUB_WORKSPACE/tools/build-directfb/verify-rx3-links.py" "$R" "$MOD"
+          python3 "$GITHUB_WORKSPACE/tools/build-directfb/verify-rx3-links.py" "$R" \
+            "$GITHUB_WORKSPACE/scripts/shims/knobshim2.so" \
+            "$GITHUB_WORKSPACE/scripts/shims/fbshim-tsc.so" \
+            "$GITHUB_WORKSPACE/audioshim-jc16.so"
           cp "$MOD" "$GITHUB_WORKSPACE/libdirectfb_fbdev-rot16.so"
 
       - name: Assemble open payload

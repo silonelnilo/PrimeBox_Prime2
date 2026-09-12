@@ -33,8 +33,8 @@ STATIC  := seqinject2 udplog
 .PHONY: all clean check
 all: $(SHARED) $(STATIC)
 
-knobshim2.so: knobshim2.c
-	$(CC) $(CFLAGS) -shared -o $@ $< -lpthread -lc $(LDFLAGS)
+knobshim2.so: knobshim2.c legacy-scan.c
+	$(CC) $(CFLAGS) -shared -o $@ $^ -lpthread -lc $(LDFLAGS)
 
 audioshim.so: audioshim.c
 	$(CC) $(CFLAGS) -shared -o $@ $< $(RX3LIB)/libdl.so.2 -lc $(LDFLAGS)
