@@ -82,7 +82,8 @@ jobs:
         run: |
           set -euo pipefail
           R="$PWD/extracted/XDJRX3-rootfs"
-          sed -i '/#include <poll.h>/a \\n#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif' scripts/shims/fbshim-tsc.c
+          sed -i '/#include <poll.h>/a \
+#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif' scripts/shims/fbshim-tsc.c
           make -C scripts/shims RX3="$R" knobshim2.so fbshim-tsc.so seqinject2
           for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so; do
             file "$f"
@@ -100,13 +101,13 @@ jobs:
           mkdir -p "$R/usr/include"
           cp -a /usr/arm-linux-gnueabi/include/. "$R/usr/include/"
 
-          # DirectFB 1.4 generated sources require fluxcomp.  Build a pinned
-          # native host copy (1.4.4, compatible with DirectFB's >=1.4.2 format)
-          # before switching CC to the ARM cross compiler.
+          # DirectFB 1.4 generated sources require fluxcomp. Build a pinned
+          # native host copy before switching CC to the ARM cross compiler.
           git clone https://github.com/deniskropp/flux.git /tmp/flux
           git -C /tmp/flux checkout 10ad2ebc78b396032714b839f200848ea0dd9503
           cd /tmp/flux
-          ./autogen.sh --prefix=/tmp/flux-install
+          ./autogen.sh
+          ./configure --prefix=/tmp/flux-install
           make -j2
           make install
           export PATH="/tmp/flux-install/bin:$PATH"
@@ -145,10 +146,6 @@ jobs:
             --disable-x11 --disable-sdl --disable-vnc --disable-avifile \
             --with-gfxdrivers=none --disable-osx --disable-devmem
 
-          # Build only the dependency chain needed by the fbdev system module.
-          # Automake does not recurse into these prerequisites when invoking the
-          # fbdev target directly, which is why the previous build could compile
-          # fbdev.c but then failed looking for ../../lib/direct/libdirect.la.
           make -C include directfb_strings.h directfb_keynames.h
           make -C lib -j2
           make -C src -j2
