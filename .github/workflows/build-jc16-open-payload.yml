@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi libc6-dev-armel-cross \
+            gcc-arm-linux-gnueabi g++-arm-linux-gnueabi binutils-arm-linux-gnueabi libc6-dev-armel-cross \
             autoconf automake libtool pkg-config gettext patch patchelf git \
             p7zip-full unzip bzip2 curl make
 
@@ -135,7 +135,9 @@ jobs:
           EOF
 
           export CC=arm-linux-gnueabi-gcc
+          export CXX=arm-linux-gnueabi-g++
           export CFLAGS="-O2 -march=armv5t -mfloat-abi=soft -U_FILE_OFFSET_BITS -D_FILE_OFFSET_BITS=32 -U_TIME_BITS -D_TIME_BITS=32 --sysroot=$R"
+          export CXXFLAGS="$CFLAGS"
           export CPPFLAGS="--sysroot=$R"
           export LDFLAGS="--sysroot=$R -L$R/lib -L$R/usr/lib -Wl,-rpath-link,$R/lib:$R/usr/lib"
           ./autogen.sh \
