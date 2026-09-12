@@ -64,3 +64,58 @@ No assumption is yet made that the Prime 2 accepts the Prime GO 64-frame period.
 The first milestone is intentionally small: boot `rbp`, get the main display/touch, browse/load, PLAY/CUE, and master/headphone audio working. Jog displays and secondary LEDs are out of scope until the basic path is stable.
 
 All runtime deployment should remain under `/data`; do not modify the read-only root filesystem for this port.
+
+## JC16 open payload and first test
+
+The `Build Prime 2 JC16 open payload` workflow now produces a single
+`prime2-jc16-open-payload.tar.gz` with the JC16 audio shim, control/touch shims,
+DirectFB module, runtime helpers, scripts, checksums and source commit ID.
+The archive preserves executable permissions. Extract it in a staging directory
+and run `sha256sum -c SHA256SUMS.txt` **from that directory** before copying files.
+
+This is an open-source payload, not yet a complete RX3 deployment: it excludes
+the proprietary RX3 chroot, fonts, player and decryption key. Prepare those from
+your own official RX3 1.20 firmware as described in `docs/01-firmware-extraction.md`.
+Do not substitute the link sysroot used by CI for a fully assembled runtime.
+The latter must contain the complete runtime symlinks, fonts, ALSA configuration,
+DeviceSQL daemon and patched `rbp-audio`.
+
+Stage the runtime at `/data/rbx3-run` and the payload files directly under
+`/data`. Preserve any existing files before replacing them. Do not install a
+boot menu entry or change SSH, firmware, system services, rootfs or bootloader.
+The first launch is manual: `sh /data/start-rb-jc16.sh`. Stop and return to
+Engine OS with `sh /data/stop-rb-jc16.sh`.
+
+The launcher checks JC16 hardware and required files before stopping Engine.
+It rolls back on preparation errors and signals, and requires rbp to survive
+five seconds before reporting startup. This is a process-liveness check, not
+proof that display, controls or audio work. The stop script selects processes
+by their chroot and executable/arguments, stops them, releases runtime mounts,
+and checks that Engine and edisksd are active. A rollback error is reported
+with a nonzero status.
+
+USB hotplug is off by default: the inherited watcher assumes Prime GO buses
+3/4, which have not been measured on Prime 2. Enable it only after confirming
+the correct external USB host buses, by passing `USBWATCH_BUSES` to the launcher.
+That mode also requires an executable `/data/timeout`; it is not in this payload.
+
+## Build #14 diagnosis and regression checks
+
+Run `34688601573` at commit `54f51b580f3e966d3ac749c12c2f46339b34ad4f`
+built the DirectFB module and printed `DirectFB module GLIBC: GLIBC_2.4`,
+then exited 1 during post-build validation. Its final objdump check searched
+`__fxstat.*GLIBC_2.4`; GNU objdump prints the version **before** the symbol,
+so that expression cannot validate the intended import. The replacement
+validator parses symbols separately and reports missing exports, wrong GLIBC,
+wrong ELF/float ABI, wrong DirectFB dependencies and leftover build RPATHs.
+
+Run the host-side regression tests with:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+They exercise the symbol-column regression, incompatible/missing symbols,
+process selection, rollback service failures, rollback on unexpected startup
+failure, and aborting device setup after failed unmount. Hardware testing is
+still required; these tests do not connect to a Prime 2.

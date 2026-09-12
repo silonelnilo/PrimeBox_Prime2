@@ -10,14 +10,20 @@ CHROOT=/data/rbx3-run
 STOP=/data/stop-rb-jc16.sh
 ENGINE_STOPPED=0
 
-fail() {
-    echo "ERROR: $*" >&2
-    if [ "$ENGINE_STOPPED" = 1 ] && [ -f "$STOP" ]; then
+cleanup() {
+    rc=$?
+    trap - EXIT HUP INT TERM
+    if [ "$ENGINE_STOPPED" = 1 ]; then
         echo "rolling back to Engine OS..." >&2
-        sh "$STOP" >/dev/null 2>&1 || true
+        sh "$STOP" || rc=1
     fi
-    exit 1
+    exit "$rc"
 }
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+fail() { echo "ERROR: $*" >&2; exit 1; }
 
 # Refuse to touch services on anything other than the validated Prime 2 ID.
 COMPAT="$(tr '\000' ' ' </proc/device-tree/compatible 2>/dev/null || true)"
@@ -42,22 +48,26 @@ for f in \
     /data/fix-dev.sh \
     /data/usb-watch.sh \
     "$STOP" \
+    /data/jc16-runtime.sh \
     "$CHROOT/lib/ld-linux.so.3" \
     "$CHROOT/usr/bin/edb_streamd"; do
     [ -e "$f" ] || fail "missing required file: $f"
 done
 mkdir -p "$CHROOT/root/pdj" "$CHROOT/usr/lib" "$CHROOT/usr/lib/directfb-1.4-6/systems"
 
+. /data/jc16-runtime.sh
+
 # 1. Release hardware currently owned by Engine OS.
-systemctl stop engine.service edisksd.service 2>/dev/null || true
 ENGINE_STOPPED=1
+systemctl stop engine.service edisksd.service || fail "could not stop Engine services"
 sleep 1
 
 # 2. Kill stale PrimeBox processes only.
-for p in $(ps w | awk '$0 ~ /[s]trace|[r]oot\/pdj\/[r]bp|[e]db_streamd|[g]dbserver|[u]sb-watch/ {print $1}'); do
-    kill -9 "$p" 2>/dev/null || true
-done
+for p in $(primebox_pids); do kill "$p" 2>/dev/null || true; done
+sleep 2
+for p in $(primebox_pids); do kill -9 "$p" 2>/dev/null || true; done
 sleep 1
+[ -z "$(primebox_pids)" ] || fail "stale PrimeBox process still running"
 
 # 3. Setup device binds/stubs used by the RX3 userspace.
 sh /data/fix-dev.sh || fail "fix-dev.sh failed"
@@ -104,24 +114,23 @@ nohup chroot "$CHROOT" env \
     LD_PRELOAD=/usr/lib/fbshim.so:/usr/lib/audioshim.so:/usr/lib/knobshim.so \
     /lib/ld-linux.so.3 /root/pdj/rbp -a \
     </dev/null >/data/rbp-p.log 2>&1 &
+RBP=$!
 
 echo "launched rbp on JC16, waiting for initialization..."
-RBP=""
 i=0
-while [ "$i" -lt 30 ]; do
-    RBP=$(ps w | awk '/\/root\/pdj\/rbp/ && !/sh -c/ && !/awk/ {print $1; exit}')
-    if [ -n "$RBP" ]; then
-        echo "RBP=$RBP running"
-        break
-    fi
-    i=$((i + 1))
+while [ "$i" -lt 5 ]; do
     sleep 1
+    kill -0 "$RBP" 2>/dev/null || fail "rbp exited; inspect /data/rbp-p.log"
+    i=$((i + 1))
 done
 
-[ -n "$RBP" ] || fail "rbp did not stay running; inspect /data/rbp-p.log and /tmp/audioshim.log"
-
 # 9. Start USB watcher after rbp is up.
-sh /data/usb-watch.sh start 2>/dev/null || true
+# Prime 2 USB bus mapping has not been verified; opt in after measurement.
+if [ -n "${USBWATCH_BUSES:-}" ]; then
+    [ -x /data/timeout ] || fail "USB watcher requires /data/timeout"
+    export USBWATCH_BUSES
+    sh /data/usb-watch.sh start || fail "USB watcher failed"
+fi
 
 ENGINE_STOPPED=0
 echo "PrimeBox JC16 started"

@@ -1,6 +1,9 @@
 #!/bin/sh
-umount /data/rbx3-run/dev 2>/dev/null
-rm -rf /data/rbx3-run/dev
+set -eu
+# Never recursively delete a directory that may still bind the host /dev.
+if mountpoint -q /data/rbx3-run/dev; then
+  umount /data/rbx3-run/dev
+fi
 mkdir -p /data/rbx3-run/dev
 mount --bind /dev /data/rbx3-run/dev
 mountpoint -q /data/rbx3-run/proc || mount --bind /proc /data/rbx3-run/proc

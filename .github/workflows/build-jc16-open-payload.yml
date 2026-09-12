@@ -9,6 +9,7 @@ on:
       - 'scripts/shims/**'
       - 'scripts/device/**'
       - 'tools/build-directfb/**'
+      - 'tests/**'
 
 jobs:
   build:
@@ -17,6 +18,11 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check scripts and regression tests
+        run: |
+          for script in scripts/device/*jc16*.sh scripts/device/jc16-runtime.sh scripts/device/fix-dev.sh; do sh -n "$script"; done
+          python3 -m unittest discover -s tests -v
 
       - name: Install build tools
         run: |
@@ -84,7 +90,8 @@ jobs:
           R="$PWD/extracted/XDJRX3-rootfs"
           python3 -c 'p="scripts/shims/fbshim-tsc.c"; s=open(p).read(); needle="#include <poll.h>\n"; repl=needle+"#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif\n"; assert needle in s; open(p,"w").write(s.replace(needle,repl,1))'
           make -C scripts/shims RX3="$R" knobshim2.so fbshim-tsc.so seqinject2
-          for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so; do
+          RX3="$R" OUT="$PWD/audioshim-jc16.so" sh scripts/shims/build-jc16-audioshim.sh
+          for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so audioshim-jc16.so; do
             file "$f"
             ! arm-linux-gnueabi-readelf -A "$f" | grep -q Tag_ABI_VFP_args
             vers="$(arm-linux-gnueabi-objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -u || true)"
@@ -153,16 +160,10 @@ jobs:
           MOD=systems/fbdev/.libs/libdirectfb_fbdev.so
           test -f "$MOD"
           for s in libdirect-1.4.so.6 libfusion-1.4.so.6 libdirectfb-1.4.so.6; do
-            patchelf --replace-needed "$s" "${s%.6}.0" "$MOD" || true
+            patchelf --replace-needed "$s" "${s%.6}.0" "$MOD"
           done
-          file "$MOD"
-          ! arm-linux-gnueabi-readelf -A "$MOD" | grep -q Tag_ABI_VFP_args
-          vers="$(arm-linux-gnueabi-objdump -T "$MOD" | grep -o 'GLIBC_[0-9.]*' | sort -u || true)"
-          printf 'DirectFB module GLIBC: %s\n' "$vers"
-          printf '%s\n' "$vers" | awk -F_ '/GLIBC_/ {split($2,v,"."); if (v[1] > 2 || (v[1] == 2 && v[2] > 7)) bad=1} END {exit bad ? 1 : 0}'
-          arm-linux-gnueabi-nm -D "$MOD" | grep -q ' T fstat$'
-          arm-linux-gnueabi-nm -D "$MOD" | grep -q ' T __fdelt_chk$'
-          arm-linux-gnueabi-objdump -T "$MOD" | grep '__fxstat.*GLIBC_2.4'
+          patchelf --remove-rpath "$MOD"
+          python3 "$GITHUB_WORKSPACE/tools/build-directfb/verify-module.py" "$MOD"
           cp "$MOD" "$GITHUB_WORKSPACE/libdirectfb_fbdev-rot16.so"
 
       - name: Assemble open payload
@@ -170,19 +171,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p open-payload
+          cp audioshim-jc16.so open-payload/
           cp scripts/shims/knobshim2.so open-payload/
           cp scripts/shims/fbshim-tsc.so open-payload/
           cp scripts/shims/seqinject2 open-payload/
           cp libdirectfb_fbdev-rot16.so open-payload/
           cp scripts/device/fix-dev.sh open-payload/
           cp scripts/device/usb-watch.sh open-payload/
-          cp scripts/device/launcher.conf open-payload/
+          cp scripts/device/jc16-runtime.sh open-payload/
           cp scripts/device/start-rb-jc16.sh open-payload/
           cp scripts/device/stop-rb-jc16.sh open-payload/
-          sha256sum open-payload/* > open-payload/SHA256SUMS.txt
+          cp docs/12-prime2-jc16.md open-payload/README.md
+          printf '%s\n' "$GITHUB_SHA" > open-payload/BUILD_COMMIT.txt
+          chmod 755 open-payload/*.sh open-payload/seqinject2
+          (cd open-payload && sha256sum * > SHA256SUMS.txt)
+          tar -czf prime2-jc16-open-payload.tar.gz -C open-payload .
 
       - uses: actions/upload-artifact@v4
         with:
           name: prime2-jc16-open-payload
-          path: open-payload/
+          path: prime2-jc16-open-payload.tar.gz
           if-no-files-found: error
