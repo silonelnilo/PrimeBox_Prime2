@@ -145,3 +145,18 @@ three official ZIPs (firmware and both GPL source parts). It requires Python,
 `pycryptodome`, `pycdlib`, and an `unzip` supporting Deflate64. It only writes
 to a new output directory, preserves confined runtime symlinks, omits device
 nodes and removes the extracted key. It does not flash or contact the console.
+
+Build #16 confirmed plugin ABI **9 = RX3 9** and resolved every fbdev import.
+Its stricter shim check then exposed an implicit dependency on `clock_gettime`:
+RX3 provides it in `librt`, while the old rules only linked libc/pthread.
+Control and touch shims now link explicitly to RX3 `librt-2.13.so` with
+`-z defs`, so missing imports fail at link time.
+
+Use `tools/bundle/assemble-jc16.py --staging STAGING --payload PAYLOAD --output NEW_DIRECTORY`
+to create a complete **local manual-test candidate** from the staging tree and
+open payload. It requires `pyelftools`, verifies checksums, player hashes,
+private DirectFB ABI, ELF dependencies and required symbol versions, then adds
+the RX3 fonts/configuration and packages `data/`, `VALIDATION.json`, instructions
+and checksums. Proprietary userspace remains local; nothing is uploaded or
+installed by the assembler. Passing these checks does not replace hardware
+validation of display, touch, controls and audio.
