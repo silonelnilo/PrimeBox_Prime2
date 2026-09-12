@@ -82,9 +82,6 @@ jobs:
         run: |
           set -euo pipefail
           R="$PWD/extracted/XDJRX3-rootfs"
-          # Newer glibc headers may macro-redirect open() to open64(), while
-          # fbshim intentionally exports both symbols. Patch only the temporary
-          # CI checkout so upstream source behaviour remains otherwise unchanged.
           sed -i '/#include <poll.h>/a \\n#ifdef open\n#undef open\n#endif\n#ifdef open64\n#undef open64\n#endif' scripts/shims/fbshim-tsc.c
           make -C scripts/shims RX3="$R" knobshim2.so fbshim-tsc.so seqinject2
           for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so; do
@@ -103,19 +100,22 @@ jobs:
           mkdir -p "$R/usr/include"
           cp -a /usr/arm-linux-gnueabi/include/. "$R/usr/include/"
 
-          git clone --depth 1 --branch v1.4.16 https://github.com/deniskropp/DirectFB.git /tmp/directfb
+          # The deniskropp mirror exposes the historical 1.4.16 code on the
+          # directfb-1.4 branch rather than as a v1.4.16 tag.
+          git clone --depth 1 --branch directfb-1.4 https://github.com/deniskropp/DirectFB.git /tmp/directfb
+          grep -q 'DIRECTFB_MICRO_VERSION=16' /tmp/directfb/configure.in
           cd /tmp/directfb
           patch -p1 < "$GITHUB_WORKSPACE/tools/build-directfb/directfb-full.diff"
 
           export CC=arm-linux-gnueabi-gcc
-          export CFLAGS="-O2 -march=armv5t -mfloat-abi=soft --sysroot=$R"
+          export CFLAGS="-O2 -march=armv5t -mfloat-abi=soft -U_FILE_OFFSET_BITS -D_FILE_OFFSET_BITS=32 -U_TIME_BITS -D_TIME_BITS=32 --sysroot=$R"
           export CPPFLAGS="--sysroot=$R"
           export LDFLAGS="--sysroot=$R -L$R/lib -L$R/usr/lib -Wl,-rpath-link,$R/lib:$R/usr/lib"
           ./autogen.sh \
             --host=arm-linux-gnueabi --prefix=/usr \
             --disable-x11 --disable-sdl --disable-vnc --disable-avifile \
             --with-gfxdrivers=none --disable-osx --disable-devmem
-          make -j2
+          make -C systems/fbdev -j2 libdirectfb_fbdev.la
 
           MOD=systems/fbdev/.libs/libdirectfb_fbdev.so
           test -f "$MOD"
