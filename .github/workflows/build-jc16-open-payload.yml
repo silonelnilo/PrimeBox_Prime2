@@ -1,0 +1,151 @@
+name: Build Prime 2 JC16 open payload
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [prime2-jc16]
+    paths:
+      - '.github/workflows/build-jc16-open-payload.yml'
+      - 'scripts/shims/**'
+      - 'scripts/device/**'
+      - 'tools/build-directfb/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi libc6-dev-armel-cross \
+            autoconf automake libtool pkg-config gettext patch patchelf git \
+            p7zip-full unzip bzip2 curl make
+
+      - name: Recover RX3 link sysroot from official firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rx3 /tmp/gpl keys extracted/XDJRX3 extracted/XDJRX3-rootfs
+          curl -fL --retry 3 'https://downloads.support.alphatheta.com/firmwares/all-in-one-dj-systems/XDJ-RX3/XDJ-RX3_v120.zip' -o /tmp/XDJ-RX3_v120.zip
+          unzip -j /tmp/XDJ-RX3_v120.zip XDJRX3.UPD -d /tmp/rx3
+          test "$(stat -c %s /tmp/rx3/XDJRX3.UPD)" = 69171216
+
+          curl -fL --retry 3 'https://files.microcms-assets.io/assets/3b9e29ce734e49babfedb3f8d1e728e3/f7f69f5f428841898c6d98f9976c23bb/A9BEE4F7-6932-4E11-8D9F-5288F5F79EC2.zip' -o /tmp/gpl/part00.zip
+          curl -fL --retry 3 'https://files.microcms-assets.io/assets/3b9e29ce734e49babfedb3f8d1e728e3/5b39b9d79cc747c2b31ff39e22074bad/57CB205B-D45A-4143-BC09-22D8400074C2.zip' -o /tmp/gpl/part01.zip
+          unzip -j /tmp/gpl/part00.zip -d /tmp/gpl
+          unzip -j /tmp/gpl/part01.zip -d /tmp/gpl
+          cat /tmp/gpl/pioneerdj_xdj_rx3.tar.bz2.00 /tmp/gpl/pioneerdj_xdj_rx3.tar.bz2.01 > /tmp/gpl/rx3-src.tar.bz2
+          tar -xOf /tmp/gpl/rx3-src.tar.bz2 pioneerdj_xdj_rx3/initramfs.tar.gz > /tmp/gpl/initramfs.tar.gz
+          tar -xOf /tmp/gpl/initramfs.tar.gz initramfs/usr/local/pdj/aes256.key > keys/aes256.key
+          test "$(stat -c %s keys/aes256.key)" = 90
+
+          cargo build --release --manifest-path tools/rx3dec/Cargo.toml
+          tools/rx3dec/target/release/rx3dec /tmp/rx3/XDJRX3.UPD keys/aes256.key extracted/XDJRX3.iso
+          7z x -y extracted/XDJRX3.iso -oextracted/XDJRX3 >/dev/null
+
+          set +e
+          7z x -y extracted/XDJRX3/images/rootfs.cramfs -oextracted/XDJRX3-rootfs >/dev/null
+          zrc=$?
+          set -e
+          if [ "$zrc" -ne 0 ] && [ "$zrc" -ne 2 ]; then exit "$zrc"; fi
+
+          R="$PWD/extracted/XDJRX3-rootfs"
+          test -f "$R/lib/libc-2.13.so"
+          test -f "$R/lib/libpthread-2.13.so"
+          test -f "$R/lib/libdl-2.13.so"
+          test -f "$R/lib/librt-2.13.so"
+          test -f "$R/lib/libm-2.13.so"
+
+          # p7zip intentionally skips several relative/absolute symlinks.
+          # Recreate only link names needed by the linker/runtime checks.
+          ln -sfn ld-2.13.so "$R/lib/ld-linux.so.3"
+          ln -sfn libc-2.13.so "$R/lib/libc.so.6"
+          ln -sfn libpthread-2.13.so "$R/lib/libpthread.so.0"
+          ln -sfn libdl-2.13.so "$R/lib/libdl.so.2"
+          ln -sfn librt-2.13.so "$R/lib/librt.so.1"
+          ln -sfn libm-2.13.so "$R/lib/libm.so.6"
+          ln -sfn libdirect-1.4.so.0.0.0 "$R/usr/lib/libdirect-1.4.so.0"
+          ln -sfn libdirect-1.4.so.0.0.0 "$R/usr/lib/libdirect.so"
+          ln -sfn libfusion-1.4.so.0.0.0 "$R/usr/lib/libfusion-1.4.so.0"
+          ln -sfn libfusion-1.4.so.0.0.0 "$R/usr/lib/libfusion.so"
+          ln -sfn libdirectfb-1.4.so.0.0.0 "$R/usr/lib/libdirectfb-1.4.so.0"
+          ln -sfn libdirectfb-1.4.so.0.0.0 "$R/usr/lib/libdirectfb.so"
+          ln -sfn ../../lib/libdl.so.2 "$R/usr/lib/libdl.so"
+          ln -sfn ../../lib/libm.so.6 "$R/usr/lib/libm.so"
+          ln -sfn ../../lib/librt.so.1 "$R/usr/lib/librt.so"
+
+      - name: Build control and touch shims
+        shell: bash
+        run: |
+          set -euo pipefail
+          R="$PWD/extracted/XDJRX3-rootfs"
+          make -C scripts/shims RX3="$R" knobshim2.so fbshim-tsc.so seqinject2
+          for f in scripts/shims/knobshim2.so scripts/shims/fbshim-tsc.so; do
+            file "$f"
+            ! arm-linux-gnueabi-readelf -A "$f" | grep -q Tag_ABI_VFP_args
+            vers="$(arm-linux-gnueabi-objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -u || true)"
+            printf '%s: %s\n' "$f" "$vers"
+            printf '%s\n' "$vers" | awk -F_ '/GLIBC_/ {split($2,v,"."); if (v[1] > 2 || (v[1] == 2 && v[2] > 7)) bad=1} END {exit bad ? 1 : 0}'
+          done
+
+      - name: Build patched DirectFB fbdev module
+        shell: bash
+        run: |
+          set -euo pipefail
+          R="$PWD/extracted/XDJRX3-rootfs"
+          # Supply cross libc headers while retaining RX3 2.13 runtime libraries.
+          mkdir -p "$R/usr/include"
+          cp -a /usr/arm-linux-gnueabi/include/. "$R/usr/include/"
+
+          git clone --depth 1 --branch v1.4.16 https://github.com/deniskropp/DirectFB.git /tmp/directfb
+          cd /tmp/directfb
+          patch -p1 < "$GITHUB_WORKSPACE/tools/build-directfb/directfb-full.diff"
+
+          export CC=arm-linux-gnueabi-gcc
+          export CFLAGS="-O2 -march=armv5t -mfloat-abi=soft --sysroot=$R"
+          export CPPFLAGS="--sysroot=$R"
+          export LDFLAGS="--sysroot=$R -L$R/lib -L$R/usr/lib -Wl,-rpath-link,$R/lib:$R/usr/lib"
+          ./autogen.sh \
+            --host=arm-linux-gnueabi --prefix=/usr \
+            --disable-x11 --disable-sdl --disable-vnc --disable-avifile \
+            --with-gfxdrivers=none --disable-osx --disable-devmem
+          make -j2
+
+          MOD=systems/fbdev/.libs/libdirectfb_fbdev.so
+          test -f "$MOD"
+          for s in libdirect-1.4.so.6 libfusion-1.4.so.6 libdirectfb-1.4.so.6; do
+            patchelf --replace-needed "$s" "${s%.6}.0" "$MOD" || true
+          done
+          file "$MOD"
+          ! arm-linux-gnueabi-readelf -A "$MOD" | grep -q Tag_ABI_VFP_args
+          vers="$(arm-linux-gnueabi-objdump -T "$MOD" | grep -o 'GLIBC_[0-9.]*' | sort -u || true)"
+          printf 'DirectFB module GLIBC: %s\n' "$vers"
+          printf '%s\n' "$vers" | awk -F_ '/GLIBC_/ {split($2,v,"."); if (v[1] > 2 || (v[1] == 2 && v[2] > 7)) bad=1} END {exit bad ? 1 : 0}'
+          cp "$MOD" "$GITHUB_WORKSPACE/libdirectfb_fbdev-rot16.so"
+
+      - name: Assemble open payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p open-payload
+          cp scripts/shims/knobshim2.so open-payload/
+          cp scripts/shims/fbshim-tsc.so open-payload/
+          cp scripts/shims/seqinject2 open-payload/
+          cp libdirectfb_fbdev-rot16.so open-payload/
+          cp scripts/device/fix-dev.sh open-payload/
+          cp scripts/device/usb-watch.sh open-payload/
+          cp scripts/device/launcher.conf open-payload/
+          cp scripts/device/start-rb-jc16.sh open-payload/
+          cp scripts/device/stop-rb-jc16.sh open-payload/
+          sha256sum open-payload/* > open-payload/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prime2-jc16-open-payload
+          path: open-payload/
+          if-no-files-found: error
