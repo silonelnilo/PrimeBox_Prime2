@@ -18,7 +18,11 @@ RX3     ?= ../../extracted/XDJRX3-rootfs
 RX3LIB  := $(RX3)/lib
 RX3ULIB := $(RX3)/usr/lib
 
+# RX3 userspace is a 32-bit glibc-2.13 ABI.  Explicitly pin 32-bit file
+# offsets so modern cross-toolchain headers do not redirect open() to open64(),
+# which breaks fbshim-tsc because it intentionally interposes both symbols.
 CFLAGS  := -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector -fPIC \
+           -U_FILE_OFFSET_BITS -D_FILE_OFFSET_BITS=32 \
            -Wall -Wextra -Wno-unused-parameter
 LDFLAGS := -L$(RX3LIB) -L$(RX3ULIB) -Wl,-rpath-link,$(RX3LIB):$(RX3ULIB)
 
