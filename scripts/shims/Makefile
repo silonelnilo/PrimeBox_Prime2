@@ -18,30 +18,24 @@ RX3     ?= ../../extracted/XDJRX3-rootfs
 RX3LIB  := $(RX3)/lib
 RX3ULIB := $(RX3)/usr/lib
 
-# RX3 userspace is a 32-bit glibc-2.13 ABI.  Explicitly pin 32-bit file
-# offsets so modern cross-toolchain headers do not redirect open() to open64(),
-# which breaks fbshim-tsc because it intentionally interposes both symbols.
+# RX3 glibc 2.13 predates the modern 64-bit time/off_t transition on 32-bit
+# ARM.  Ubuntu's current armel cross headers default to the new ABI, so pin
+# both knobs to 32 to keep the generated interposition symbols compatible.
 CFLAGS  := -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector -fPIC \
            -U_FILE_OFFSET_BITS -D_FILE_OFFSET_BITS=32 \
+           -U_TIME_BITS -D_TIME_BITS=32 \
            -Wall -Wextra -Wno-unused-parameter
 LDFLAGS := -L$(RX3LIB) -L$(RX3ULIB) -Wl,-rpath-link,$(RX3LIB):$(RX3ULIB)
 
-# Shared LD_PRELOAD libraries (soft-float, libc-only NEEDED)
 SHARED  := knobshim2.so audioshim.so fbshim-tsc.so gpioshim.so tscshim.so crashcatch.so
-
-# Static ARM helpers (have no soft-float runtime dependency)
 STATIC  := seqinject2 udplog
 
 .PHONY: all clean check
 all: $(SHARED) $(STATIC)
 
-# knobshim2 needs the ALSA sequencer headers; host headers are fine as the
-# structs are ABI-stable.
 knobshim2.so: knobshim2.c
 	$(CC) $(CFLAGS) -shared -o $@ $< -lpthread -lc $(LDFLAGS)
 
-# audioshim must bind dlopen/dlsym to libdl GLIBC_2.4 (the .symver directives
-# are in the source); link the RX3 libdl explicitly.
 audioshim.so: audioshim.c
 	$(CC) $(CFLAGS) -shared -o $@ $< $(RX3LIB)/libdl.so.2 -lc $(LDFLAGS)
 
@@ -63,7 +57,6 @@ seqinject2: seqinject2.c
 udplog: udplog.c
 	$(CC) -O2 -march=armv5t -mfloat-abi=soft -static -o $@ $<
 
-# Fail the build if any GLIBC version above 2.7 or a hard-float tag sneaks in.
 check: $(SHARED)
 	@echo "== GLIBC symbol versions =="
 	@for f in $(SHARED); do \
