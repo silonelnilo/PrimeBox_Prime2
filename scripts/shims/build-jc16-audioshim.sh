@@ -2,8 +2,8 @@
 set -eu
 
 # Build a Prime 2 / JC16 variant of audioshim without modifying the Prime GO
-# source file.  This is intentionally a minimal first-port patch:
-#   hw:1,0  / S24_LE  ->  hw:JC16,0 / S32_LE
+# source file. This is intentionally a minimal first-port patch:
+#   hw:1,0 / S24_LE -> hw:JC16,0 / S32_LE
 # Everything else (4ch interleave, 44.1 kHz, pacing/stubs) stays identical.
 #
 # Usage:
@@ -22,8 +22,8 @@ if [ ! -f "$SRC" ]; then
     echo "error: missing $SRC" >&2
     exit 1
 fi
-if [ ! -f "$RX3/lib/libdl.so.2" ]; then
-    echo "error: RX3 rootfs not found at $RX3" >&2
+if [ ! -f "$RX3/lib/libdl-2.13.so" ] || [ ! -f "$RX3/lib/libc-2.13.so" ]; then
+    echo "error: RX3 glibc 2.13 runtime not found at $RX3/lib" >&2
     echo "set RX3=/path/to/extracted/XDJRX3-rootfs" >&2
     exit 1
 fi
@@ -36,7 +36,7 @@ TMP=$(mktemp "${TMPDIR:-/tmp}/audioshim-jc16.XXXXXX.c")
 trap 'rm -f "$TMP"' EXIT HUP INT TERM
 cp "$SRC" "$TMP"
 
-# ALSA enum value: S32_LE = 10.  audioshim intentionally avoids ALSA headers
+# ALSA enum value: S32_LE = 10. audioshim intentionally avoids ALSA headers
 # because it is linked against the old RX3 userspace ABI.
 sed -i '/#define SND_PCM_FORMAT_S24_LE   6/a #define SND_PCM_FORMAT_S32_LE   10' "$TMP"
 
@@ -55,11 +55,14 @@ grep -q '#define SND_PCM_FORMAT_S32_LE   10' "$TMP"
 grep -q '"hw:JC16,0"' "$TMP"
 grep -q 'SND_PCM_FORMAT_S32_LE)' "$TMP"
 
+# Link explicitly to the RX3 glibc 2.13 shared objects. Some extraction tools
+# deliberately skip rootfs symlinks such as libdl.so.2; the real versioned
+# files are sufficient and avoid accidentally resolving against host glibc.
 "$CC" \
     -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector -fPIC \
     -Wall -Wextra -Wno-unused-parameter \
     -shared -o "$OUT" "$TMP" \
-    "$RX3/lib/libdl.so.2" -lc \
+    "$RX3/lib/libdl-2.13.so" "$RX3/lib/libc-2.13.so" \
     -L"$RX3/lib" -L"$RX3/usr/lib" \
     -Wl,-rpath-link,"$RX3/lib:$RX3/usr/lib"
 

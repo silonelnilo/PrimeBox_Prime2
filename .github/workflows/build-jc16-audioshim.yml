@@ -44,13 +44,21 @@ jobs:
           mkdir -p extracted/XDJRX3 extracted/XDJRX3-rootfs
           tools/rx3dec/target/release/rx3dec /tmp/rx3/XDJRX3.UPD keys/aes256.key extracted/XDJRX3.iso
           7z x -y extracted/XDJRX3.iso -oextracted/XDJRX3 >/dev/null
+
+          # p7zip 16.02 extracts the regular cramfs files correctly but exits 2
+          # after refusing unsafe absolute/parent-traversal symlinks. Those
+          # symlinks are not needed to link audioshim; validate the real glibc
+          # files instead of treating the safety warnings as a failed extract.
+          set +e
           7z x -y extracted/XDJRX3/images/rootfs.cramfs -oextracted/XDJRX3-rootfs >/dev/null
-          test -f extracted/XDJRX3-rootfs/lib/libdl-2.13.so
-          if [ ! -L extracted/XDJRX3-rootfs/lib/libdl.so.2 ]; then
-            rm -f extracted/XDJRX3-rootfs/lib/libdl.so.2
-            ln -s libdl-2.13.so extracted/XDJRX3-rootfs/lib/libdl.so.2
+          zrc=$?
+          set -e
+          if [ "$zrc" -ne 0 ] && [ "$zrc" -ne 2 ]; then
+            echo "unexpected 7z exit code: $zrc" >&2
+            exit "$zrc"
           fi
-          test -L extracted/XDJRX3-rootfs/lib/libdl.so.2
+          test -f extracted/XDJRX3-rootfs/lib/libdl-2.13.so
+          test -f extracted/XDJRX3-rootfs/lib/libc-2.13.so
       - name: Build JC16 audioshim
         run: |
           chmod +x scripts/shims/build-jc16-audioshim.sh
@@ -59,7 +67,14 @@ jobs:
         run: |
           file audioshim-jc16.so
           ! arm-linux-gnueabi-readelf -A audioshim-jc16.so | grep -q Tag_ABI_VFP_args
-          arm-linux-gnueabi-objdump -T audioshim-jc16.so | grep -o 'GLIBC_[0-9.]*' | sort -u
+          GLIBC_VERSIONS="$(arm-linux-gnueabi-objdump -T audioshim-jc16.so | grep -o 'GLIBC_[0-9.]*' | sort -u || true)"
+          printf '%s\n' "$GLIBC_VERSIONS"
+          if printf '%s\n' "$GLIBC_VERSIONS" | awk -F_ '/GLIBC_/ {split($2,v,"."); if (v[1] > 2 || (v[1] == 2 && v[2] > 7)) bad=1} END {exit bad ? 1 : 0}'; then
+            :
+          else
+            echo "error: audioshim references GLIBC newer than 2.7" >&2
+            exit 1
+          fi
           sha256sum audioshim-jc16.so > audioshim-jc16.so.sha256
       - uses: actions/upload-artifact@v4
         with:
