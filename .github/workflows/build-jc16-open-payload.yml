@@ -100,6 +100,18 @@ jobs:
           mkdir -p "$R/usr/include"
           cp -a /usr/arm-linux-gnueabi/include/. "$R/usr/include/"
 
+          # DirectFB 1.4 generated sources require fluxcomp.  Build a pinned
+          # native host copy (1.4.4, compatible with DirectFB's >=1.4.2 format)
+          # before switching CC to the ARM cross compiler.
+          git clone https://github.com/deniskropp/flux.git /tmp/flux
+          git -C /tmp/flux checkout 10ad2ebc78b396032714b839f200848ea0dd9503
+          cd /tmp/flux
+          ./autogen.sh --prefix=/tmp/flux-install
+          make -j2
+          make install
+          export PATH="/tmp/flux-install/bin:$PATH"
+          test "$(fluxcomp -V)" -ge 1004002
+
           git clone --depth 1 --branch directfb-1.4 https://github.com/deniskropp/DirectFB.git /tmp/directfb
           grep -q 'DIRECTFB_MICRO_VERSION=16' /tmp/directfb/configure.in
           cd /tmp/directfb
