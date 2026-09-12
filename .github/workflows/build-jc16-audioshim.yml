@@ -44,8 +44,12 @@ jobs:
           mkdir -p extracted/XDJRX3 extracted/XDJRX3-rootfs
           tools/rx3dec/target/release/rx3dec /tmp/rx3/XDJRX3.UPD keys/aes256.key extracted/XDJRX3.iso
           7z x -y extracted/XDJRX3.iso -oextracted/XDJRX3 >/dev/null
-          fsck.cramfs -x extracted/XDJRX3-rootfs extracted/XDJRX3/images/rootfs.cramfs
+          7z x -y extracted/XDJRX3/images/rootfs.cramfs -oextracted/XDJRX3-rootfs >/dev/null
           test -f extracted/XDJRX3-rootfs/lib/libdl-2.13.so
+          if [ ! -L extracted/XDJRX3-rootfs/lib/libdl.so.2 ]; then
+            rm -f extracted/XDJRX3-rootfs/lib/libdl.so.2
+            ln -s libdl-2.13.so extracted/XDJRX3-rootfs/lib/libdl.so.2
+          fi
           test -L extracted/XDJRX3-rootfs/lib/libdl.so.2
       - name: Build JC16 audioshim
         run: |
