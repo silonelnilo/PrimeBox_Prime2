@@ -160,3 +160,20 @@ the RX3 fonts/configuration and packages `data/`, `VALIDATION.json`, instruction
 and checksums. Proprietary userspace remains local; nothing is uploaded or
 installed by the assembler. Passing these checks does not replace hardware
 validation of display, touch, controls and audio.
+
+### First hardware test (2026-09-14)
+
+The launcher stopped after `rbp` exited; rollback successfully restored both
+Engine and edisksd. The player log reported `DS_HW_Glib3_DFB.c <293>`.
+Disassembly of the canonical patched player maps that line to the error path
+after `DirectFBCreate` (call at VA `0x1a355c`). The subsequent code uses the
+interface pointer even after failure. The underlying DirectFB error is not yet
+known: rbp explicitly sets `quiet` before calling DirectFBCreate.
+
+For a diagnostic-only retry, `tools/patch-rbp/enable-dfb-diagnostics.py` changes
+only the five bytes of the `quiet` option string at VA `0x443454` to `debug`.
+It requires the canonical patched player MD5 and writes to a new output file.
+Preserve `/data/rbp-audio` before using that variant. This enables diagnostics;
+it is not a fix for the graphics initialization failure. Do not infer that the
+brief partially black display identifies a rotation bug before the detailed
+DirectFB error is available.
