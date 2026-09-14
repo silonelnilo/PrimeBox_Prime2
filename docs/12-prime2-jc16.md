@@ -177,3 +177,19 @@ Preserve `/data/rbp-audio` before using that variant. This enables diagnostics;
 it is not a fix for the graphics initialization failure. Do not infer that the
 brief partially black display identifies a rotation bug before the detailed
 DirectFB error is available.
+
+### Graphics driver exclusion after diagnostic hardware test
+
+The diagnostic log initializes the Rockchip framebuffer, rotation and Linux
+Input successfully, then reports `Could not initialize 'graphics_core' core`.
+The runtime carried RX3's sole graphics plugin, `gfxdrivers/libdirectfb_gal.so`.
+DirectFB 1.4.0 enumerates/probes and initializes graphics drivers before applying
+`software_only` (`no-hardware`), so that setting alone does not exclude Vivante
+initialization on the Rockchip-based JC16.
+
+The bundle assembler now omits `gfxdrivers` and creates an empty module directory;
+the software rasterizer remains in libdirectfb. On the first test device the
+plugin was moved to `/data/primebox-stage-e012123/disabled-gfxdrivers/` while
+Engine remained active. `usr/lib/libGAL.so` is retained because the player/g2d
+link against it; this change excludes only the DirectFB hardware plugin.
+The next manual test must confirm whether graphics initialization proceeds.

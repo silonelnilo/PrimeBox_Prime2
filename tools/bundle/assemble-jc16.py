@@ -109,7 +109,10 @@ def main():
     root.mkdir(parents=True)
     for directory in ('bin', 'lib', 'usr/lib', 'usr/share/alsa'):
         src = source / 'rootfs' / directory
-        shutil.copytree(src, root / directory, symlinks=True, ignore=shutil.ignore_patterns('modules', 'udev'))
+        shutil.copytree(src, root / directory, symlinks=True, ignore=shutil.ignore_patterns('modules', 'udev', 'gfxdrivers'))
+    # RX3's Vivante driver probes even with no-hardware, then fails on JC16.
+    # Keep the software rasterizer in libdirectfb and an empty driver directory.
+    (root / 'usr/lib/directfb-1.4-0/gfxdrivers').mkdir(parents=True, exist_ok=True)
     (root / 'usr/bin').mkdir(parents=True, exist_ok=True)
     for name in ('edb_streamd', 'kill_daemon', 'env'):
         src = source / 'rootfs/usr/bin' / name
